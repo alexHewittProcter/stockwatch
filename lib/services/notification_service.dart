@@ -1,10 +1,16 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'dart:io' show Platform;
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin _notifications =
+  static final FlutterLocalNotificationsPlugin _notifications = 
       FlutterLocalNotificationsPlugin();
-
+      
+  static bool _initialized = false;
+  
   static Future<void> initialize() async {
+    if (_initialized) return;
+    
+    // Initialize settings for macOS
     const macOSSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -17,112 +23,143 @@ class NotificationService {
     
     await _notifications.initialize(
       initSettings,
-      onDidReceiveNotificationResponse: _onNotificationTap,
+      onDidReceiveNotificationResponse: _onNotificationResponse,
     );
+    
+    // Request permissions on macOS
+    if (Platform.isMacOS) {
+      await _notifications
+          .resolvePlatformSpecificImplementation<MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+    }
+    
+    _initialized = true;
   }
-
-  static Future<void> requestPermissions() async {
-    await _notifications
-        .resolvePlatformSpecificImplementation<
-            MacOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
+  
+  static void _onNotificationResponse(NotificationResponse response) {
+    // Handle notification tap
+    print('Notification tapped: ${response.payload}');
+    // TODO: Navigate to relevant screen based on payload
   }
-
+  
+  // Show price alert notification
   static Future<void> showPriceAlert({
     required String symbol,
     required double price,
-    required double targetPrice,
-    required bool isAbove,
+    required String condition,
   }) async {
-    const notificationDetails = NotificationDetails(
+    const details = NotificationDetails(
       macOS: DarwinNotificationDetails(
-        categoryIdentifier: 'price_alert',
-        subtitle: 'Price Alert',
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        sound: 'default',
+        categoryIdentifier: 'PRICE_ALERT',
       ),
     );
-
-    final direction = isAbove ? 'above' : 'below';
-    final formattedPrice = '\$${price.toStringAsFixed(2)}';
-    final formattedTarget = '\$${targetPrice.toStringAsFixed(2)}';
-
+    
     await _notifications.show(
       symbol.hashCode,
-      '$symbol Price Alert',
-      '$symbol is now $formattedPrice ($direction $formattedTarget)',
-      notificationDetails,
+      'Price Alert: $symbol',
+      '$symbol $condition \$${price.toStringAsFixed(2)}',
+      details,
+      payload: 'price_alert:$symbol',
     );
   }
-
-  static Future<void> showMovementAlert({
-    required String symbol,
-    required double changePercent,
-    required double price,
+  
+  // Show opportunity notification
+  static Future<void> showOpportunity({
+    required String title,
+    required String description,
+    String? symbol,
   }) async {
-    const notificationDetails = NotificationDetails(
+    const details = NotificationDetails(
       macOS: DarwinNotificationDetails(
-        categoryIdentifier: 'movement_alert',
-        subtitle: 'Movement Alert',
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        sound: 'default',
+        categoryIdentifier: 'OPPORTUNITY',
       ),
     );
-
-    final direction = changePercent >= 0 ? '+' : '';
-    final formattedPercent = '$direction${changePercent.toStringAsFixed(2)}%';
-    final formattedPrice = '\$${price.toStringAsFixed(2)}';
-
+    
     await _notifications.show(
-      '${symbol}_movement'.hashCode,
-      '$symbol Movement Alert',
-      '$symbol moved $formattedPercent to $formattedPrice',
-      notificationDetails,
+      title.hashCode,
+      'Opportunity: $title',
+      description,
+      details,
+      payload: 'opportunity:${symbol ?? ''}',
     );
   }
-
-  static Future<void> showTradeNotification({
-    required String type,
+  
+  // Show holder movement notification
+  static Future<void> showHolderMovement({
+    required String holder,
     required String symbol,
-    required int quantity,
-    required double price,
+    required String action,
+    required double shares,
   }) async {
-    const notificationDetails = NotificationDetails(
+    const details = NotificationDetails(
       macOS: DarwinNotificationDetails(
-        categoryIdentifier: 'trade_notification',
-        subtitle: 'Trade Executed',
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        sound: 'default',
+        categoryIdentifier: 'HOLDER_MOVEMENT',
       ),
     );
-
-    final formattedPrice = '\$${price.toStringAsFixed(2)}';
-
+    
+    final shareText = shares > 1000000 
+        ? '${(shares / 1000000).toStringAsFixed(1)}M shares'
+        : shares > 1000 
+            ? '${(shares / 1000).toStringAsFixed(1)}K shares'
+            : '${shares.toInt()} shares';
+    
     await _notifications.show(
-      DateTime.now().millisecondsSinceEpoch,
-      'Trade Executed',
-      '$type $quantity shares of $symbol at $formattedPrice',
-      notificationDetails,
+      '$holder-$symbol'.hashCode,
+      'Holder Alert: $holder',
+      '$action $shareText of $symbol',
+      details,
+      payload: 'holder:$symbol',
     );
   }
-
-  static void _onNotificationTap(NotificationResponse response) {
-    // Handle notification tap - could navigate to specific screen
-    print('Notification tapped: ${response.payload}');
+  
+  // Show news notification
+  static Future<void> showNews({
+    required String headline,
+    required String summary,
+    String? symbol,
+  }) async {
+    const details = NotificationDetails(
+      macOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+        sound: 'default',
+        categoryIdentifier: 'NEWS',
+      ),
+    );
+    
+    await _notifications.show(
+      headline.hashCode,
+      'News Alert',
+      headline,
+      details,
+      payload: 'news:${symbol ?? ''}',
+    );
   }
-
-  static Future<void> cancelAll() async {
-    await _notifications.cancelAll();
-  }
-
+  
+  // Cancel notification
   static Future<void> cancel(int id) async {
     await _notifications.cancel(id);
+  }
+  
+  // Cancel all notifications
+  static Future<void> cancelAll() async {
+    await _notifications.cancelAll();
   }
 }

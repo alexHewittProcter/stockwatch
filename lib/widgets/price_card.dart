@@ -1,207 +1,360 @@
 import 'package:flutter/material.dart';
-import 'package:stockwatch/models/stock.dart';
-import 'package:stockwatch/theme/app_theme.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../theme/app_theme.dart';
+import '../services/api_client.dart';
+import 'sparkline_chart.dart';
 
-class PriceCard extends StatelessWidget {
+class PriceCard extends ConsumerStatefulWidget {
   final String symbol;
-  final String title;
-  final List<dynamic> stocks;
+  final double price;
+  final double change;
+  final double changePercent;
+  final bool showSparkline;
+  final VoidCallback? onTap;
 
   const PriceCard({
     super.key,
     required this.symbol,
-    required this.title,
-    required this.stocks,
+    required this.price,
+    required this.change,
+    required this.changePercent,
+    this.showSparkline = false,
+    this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final stock = _findStock();
+  ConsumerState<PriceCard> createState() => _PriceCardState();
+}
+
+class _PriceCardState extends ConsumerState<PriceCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _pulseAnimation;
+  
+  double _displayedPrice;
+  double _displayedChange;
+  double _displayedChangePercent;
+  
+  @override
+  void initState() {
+    super.initState();
     
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.cardDark,
-        border: Border.all(color: AppTheme.borderColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: stock != null 
-            ? _buildStockContent(context, stock)
-            : _buildPlaceholderContent(),
-      ),
+    _displayedPrice = widget.price;
+    _displayedChange = widget.change;
+    _displayedChangePercent = widget.changePercent;
+    
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
     );
+    
+    _pulseAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.05,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // Listen to price stream for real-time updates
+    _listenToPriceUpdates();
   }
 
-  Stock? _findStock() {
-    try {
-      return stocks.firstWhere(
-        (s) => s is Stock && s.symbol == symbol,
-        orElse: () => null,
-      ) as Stock?;
-    } catch (e) {
-      return null;
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _listenToPriceUpdates() {
+    final apiClient = ref.read(apiClientProvider);
+    
+    apiClient.priceStream.listen((quote) {
+      if (quote.symbol == widget.symbol) {
+        _updatePrice(quote.price, quote.change, quote.changePercent);
+      }
+    });
+  }
+
+  void _updatePrice(double newPrice, double newChange, double newChangePercent) {
+    if (mounted) {
+      setState(() {
+        _displayedPrice = newPrice;
+        _displayedChange = newChange;
+        _displayedChangePercent = newChangePercent;
+      });
+      
+      // Trigger pulse animation for price change
+      _animationController.forward().then((_) {
+        _animationController.reverse();
+      });
     }
   }
 
-  Widget _buildStockContent(BuildContext context, Stock stock) {
-    final isPositive = stock.change >= 0;
-    final changeColor = isPositive ? AppTheme.bullGreen : AppTheme.bearRed;
-    final changeIcon = isPositive ? Icons.trending_up : Icons.trending_down;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _pulseAnimation.value,
+          child: Card(
+            child: InkWell(
+              onTap: widget.onTap,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Symbol and menu button
+                    Row(
+                      children: [
+                        Text(
+                          widget.symbol,
+                          style: AppTextStyles.ticker,
+                        ),
+                        const Spacer(),
+                        if (widget.onTap != null)
+                          Icon(
+                            Icons.arrow_forward_ios,
+                            size: 16,
+                            color: AppColors.textMuted,
+                          ),
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Price
+                    Text(
+                      '\$${_displayedPrice.toStringAsFixed(2)}',
+                      style: AppTextStyles.numberLarge,
+                    ),
+                    
+                    const SizedBox(height: 4),
+                    
+                    // Change and change percent
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _displayedChange.changeBackgroundColor,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _displayedChange >= 0 
+                                    ? Icons.arrow_upward 
+                                    : Icons.arrow_downward,
+                                size: 12,
+                                color: _displayedChange.changeColor,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${_displayedChange >= 0 ? '+' : ''}${_displayedChange.toStringAsFixed(2)}',
+                                style: AppTextStyles.numberSmall.withChangeColor(_displayedChange),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_displayedChangePercent >= 0 ? '+' : ''}${_displayedChangePercent.toStringAsFixed(2)}%',
+                          style: AppTextStyles.numberSmall.withChangeColor(_displayedChangePercent),
+                        ),
+                      ],
+                    ),
+                    
+                    // Sparkline chart
+                    if (widget.showSparkline) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 60,
+                        child: SparklineChart(
+                          symbol: widget.symbol,
+                          color: _displayedChange.changeColor,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Simplified price card for dashboard widgets
+class CompactPriceCard extends ConsumerWidget {
+  final String symbol;
+  final double price;
+  final double changePercent;
+  final VoidCallback? onTap;
+
+  const CompactPriceCard({
+    super.key,
+    required this.symbol,
+    required this.price,
+    required this.changePercent,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                symbol,
+                style: AppTextStyles.ticker.copyWith(fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '\$${price.toStringAsFixed(2)}',
+                style: AppTextStyles.numberMedium.copyWith(fontSize: 18),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    changePercent >= 0 
+                        ? Icons.arrow_upward 
+                        : Icons.arrow_downward,
+                    size: 10,
+                    color: changePercent.changeColor,
                   ),
+                  const SizedBox(width: 2),
                   Text(
-                    stock.symbol,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.textTertiary,
+                    '${changePercent >= 0 ? '+' : ''}${changePercent.toStringAsFixed(1)}%',
+                    style: AppTextStyles.numberSmall.copyWith(
+                      fontSize: 10,
+                      color: changePercent.changeColor,
                     ),
                   ),
                 ],
               ),
-            ),
-            if (stock.isRealTime)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.bullGreen,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'LIVE',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const Spacer(),
-        Text(
-          stock.formattedPrice,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            fontFeatures: const [FontFeature.tabularFigures()],
+            ],
           ),
         ),
-        Row(
-          children: [
-            Icon(
-              changeIcon,
-              size: 16,
-              color: changeColor,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              stock.formattedChange,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: changeColor,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '(${stock.formattedChangePercent})',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: changeColor,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _formatLastUpdated(stock.lastUpdated),
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: AppTheme.textTertiary,
-            fontSize: 10,
-          ),
-        ),
-      ],
+      ),
     );
   }
+}
 
-  Widget _buildPlaceholderContent() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        Text(
-          symbol,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppTheme.textTertiary,
-          ),
-        ),
-        const Spacer(),
-        const Text(
-          '--',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        const Row(
-          children: [
-            Icon(
-              Icons.more_horiz,
-              size: 16,
-              color: AppTheme.textTertiary,
-            ),
-            SizedBox(width: 4),
-            Text(
-              'Loading...',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppTheme.textTertiary,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
+// Animated price ticker for real-time updates
+class AnimatedPriceDisplay extends ConsumerStatefulWidget {
+  final String symbol;
+  final double initialPrice;
+  final TextStyle? style;
 
-  String _formatLastUpdated(DateTime timestamp) {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
+  const AnimatedPriceDisplay({
+    super.key,
+    required this.symbol,
+    required this.initialPrice,
+    this.style,
+  });
+
+  @override
+  ConsumerState<AnimatedPriceDisplay> createState() => _AnimatedPriceDisplayState();
+}
+
+class _AnimatedPriceDisplayState extends ConsumerState<AnimatedPriceDisplay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<Color?> _colorAnimation;
+  
+  double _currentPrice;
+  Color? _flashColor;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPrice = widget.initialPrice;
     
-    if (difference.inSeconds < 10) {
-      return 'Live';
-    } else if (difference.inSeconds < 60) {
-      return '${difference.inSeconds}s ago';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return '${difference.inHours}h ago';
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    
+    _colorAnimation = ColorTween(
+      begin: Colors.transparent,
+      end: Colors.transparent,
+    ).animate(_animationController);
+    
+    // Listen to price updates
+    _listenToPriceUpdates();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _listenToPriceUpdates() {
+    final apiClient = ref.read(apiClientProvider);
+    
+    apiClient.priceStream.listen((quote) {
+      if (quote.symbol == widget.symbol) {
+        _updatePrice(quote.price);
+      }
+    });
+  }
+
+  void _updatePrice(double newPrice) {
+    if (mounted && newPrice != _currentPrice) {
+      final isIncrease = newPrice > _currentPrice;
+      
+      setState(() {
+        _currentPrice = newPrice;
+        _flashColor = isIncrease ? AppColors.positive : AppColors.negative;
+      });
+      
+      // Animate color flash
+      _colorAnimation = ColorTween(
+        begin: _flashColor?.withOpacity(0.3),
+        end: Colors.transparent,
+      ).animate(_animationController);
+      
+      _animationController.forward(from: 0);
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _colorAnimation,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: _colorAnimation.value,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Text(
+            '\$${_currentPrice.toStringAsFixed(2)}',
+            style: widget.style ?? AppTextStyles.numberMedium,
+          ),
+        );
+      },
+    );
   }
 }

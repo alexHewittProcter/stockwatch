@@ -1,0 +1,493 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// Models for API responses
+class Quote {
+  final String symbol;
+  final double price;
+  final double change;
+  final double changePercent;
+  final double volume;
+  final DateTime timestamp;
+
+  Quote({
+    required this.symbol,
+    required this.price,
+    required this.change,
+    required this.changePercent,
+    required this.volume,
+    required this.timestamp,
+  });
+
+  factory Quote.fromJson(Map<String, dynamic> json) {
+    return Quote(
+      symbol: json['symbol'],
+      price: json['price']?.toDouble() ?? 0.0,
+      change: json['change']?.toDouble() ?? 0.0,
+      changePercent: json['changePercent']?.toDouble() ?? 0.0,
+      volume: json['volume']?.toDouble() ?? 0.0,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp']),
+    );
+  }
+}
+
+class Candle {
+  final DateTime timestamp;
+  final double open;
+  final double high;
+  final double low;
+  final double close;
+  final double volume;
+
+  Candle({
+    required this.timestamp,
+    required this.open,
+    required this.high,
+    required this.low,
+    required this.close,
+    required this.volume,
+  });
+
+  factory Candle.fromJson(Map<String, dynamic> json) {
+    return Candle(
+      timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp']),
+      open: json['open']?.toDouble() ?? 0.0,
+      high: json['high']?.toDouble() ?? 0.0,
+      low: json['low']?.toDouble() ?? 0.0,
+      close: json['close']?.toDouble() ?? 0.0,
+      volume: json['volume']?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  
+  ApiException(this.message, {this.statusCode});
+  
+  @override
+  String toString() => 'ApiException: $message';
+}
+
+class ApiClient {
+  late Dio _dio;
+  WebSocketChannel? _wsChannel;
+  Timer? _reconnectTimer;
+  Timer? _pingTimer;
+  final StreamController<Quote> _priceStreamController = StreamController<Quote>.broadcast();
+  final Set<String> _subscribedSymbols = {};
+  bool _isConnecting = false;
+  
+  String _baseUrl = 'http://localhost:3002';
+  
+  // Getters
+  Stream<Quote> get priceStream => _priceStreamController.stream;
+  bool get isConnected => _wsChannel != null;
+  
+  ApiClient() {
+    _initDio();
+    _loadSettings();
+  }
+  
+  void _initDio() {
+    _dio = Dio(BaseOptions(
+      baseUrl: _baseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+      sendTimeout: const Duration(seconds: 10),
+    ));
+    
+    _dio.interceptors.add(LogInterceptor(
+      requestBody: true,
+      responseBody: true,
+      logPrint: (obj) => print('[API] $obj'),
+    ));
+    
+    _dio.interceptors.add(InterceptorsWrapper(
+      onError: (error, handler) {
+        print('[API Error] ${error.message}');
+        return handler.next(error);
+      },
+    ));
+  }
+  
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedUrl = prefs.getString('api_base_url');
+    if (savedUrl != null) {
+      _baseUrl = savedUrl;
+      _dio.options.baseUrl = _baseUrl;
+    }
+  }
+  
+  Future<void> updateBaseUrl(String url) async {
+    _baseUrl = url;
+    _dio.options.baseUrl = url;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('api_base_url', url);
+    
+    // Reconnect WebSocket with new URL
+    if (_wsChannel != null) {
+      _disconnect();
+      await _connectWebSocket();
+    }
+  }
+  
+  // HTTP API Methods
+  Future<T> _request<T>(
+    String method,
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    dynamic data,
+    T Function(dynamic)? parser,
+  }) async {
+    try {
+      Response response;
+      
+      switch (method.toUpperCase()) {
+        case 'GET':
+          response = await _dio.get(path, queryParameters: queryParameters);
+          break;
+        case 'POST':
+          response = await _dio.post(path, data: data, queryParameters: queryParameters);
+          break;
+        case 'PUT':
+          response = await _dio.put(path, data: data, queryParameters: queryParameters);
+          break;
+        case 'DELETE':
+          response = await _dio.delete(path, queryParameters: queryParameters);
+          break;
+        default:
+          throw ApiException('Unsupported HTTP method: $method');
+      }
+      
+      if (response.statusCode! >= 200 && response.statusCode! < 300) {
+        return parser != null ? parser(response.data) : response.data as T;
+      } else {
+        throw ApiException(
+          'HTTP ${response.statusCode}: ${response.statusMessage}',
+          statusCode: response.statusCode,
+        );
+      }
+    } on DioException catch (e) {
+      throw ApiException(
+        e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+  
+  // Market Data API
+  Future<Quote> getQuote(String symbol) async {
+    return await _request<Quote>(
+      'GET',
+      '/api/market/quote/$symbol',
+      parser: (data) => Quote.fromJson(data),
+    );
+  }
+  
+  Future<List<Candle>> getCandles(
+    String symbol, {
+    String interval = '5m',
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final queryParams = <String, dynamic>{
+      'interval': interval,
+      if (from != null) 'from': from.millisecondsSinceEpoch,
+      if (to != null) 'to': to.millisecondsSinceEpoch,
+    };
+    
+    return await _request<List<Candle>>(
+      'GET',
+      '/api/market/candles/$symbol',
+      queryParameters: queryParams,
+      parser: (data) => (data as List).map((item) => Candle.fromJson(item)).toList(),
+    );
+  }
+  
+  Future<List<dynamic>> searchSymbols(String query) async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/market/search',
+      queryParameters: {'q': query},
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  Future<List<dynamic>> getTopMovers() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/market/movers',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  // Dashboard API
+  Future<List<dynamic>> getDashboards() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/dashboards',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  Future<List<dynamic>> getDefaultDashboards() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/dashboards/defaults',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  Future<dynamic> createDashboard(Map<String, dynamic> dashboard) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/dashboards',
+      data: dashboard,
+    );
+  }
+  
+  Future<dynamic> updateDashboard(String id, Map<String, dynamic> dashboard) async {
+    return await _request<dynamic>(
+      'PUT',
+      '/api/dashboards/$id',
+      data: dashboard,
+    );
+  }
+  
+  Future<void> deleteDashboard(String id) async {
+    await _request<void>('DELETE', '/api/dashboards/$id');
+  }
+  
+  // Portfolio API
+  Future<List<dynamic>> getPositions() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/portfolio/positions',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  Future<dynamic> placeOrder(Map<String, dynamic> order) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/portfolio/order',
+      data: order,
+    );
+  }
+  
+  // News API
+  Future<List<dynamic>> getNewsFeed({String tab = 'foryou'}) async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/news/feed',
+      queryParameters: {'tab': tab},
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  // Holders API
+  Future<List<dynamic>> getHolders(String symbol) async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/holders/$symbol',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  // Options API
+  Future<List<dynamic>> getOptionsChain(String symbol) async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/options/chain/$symbol',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  // Opportunities API
+  Future<List<dynamic>> getOpportunities() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/opportunities',
+      parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  // WebSocket Connection Management
+  Future<void> connectWebSocket() async {
+    await _connectWebSocket();
+  }
+  
+  Future<void> _connectWebSocket() async {
+    if (_isConnecting || _wsChannel != null) return;
+    
+    _isConnecting = true;
+    
+    try {
+      final wsUrl = _baseUrl.replaceFirst('http', 'ws') + '/ws/prices';
+      print('[WebSocket] Connecting to $wsUrl');
+      
+      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      
+      // Listen for messages
+      _wsChannel!.stream.listen(
+        _handleWebSocketMessage,
+        onError: _handleWebSocketError,
+        onDone: _handleWebSocketClosed,
+      );
+      
+      // Start ping timer to keep connection alive
+      _startPingTimer();
+      
+      // Subscribe to existing symbols
+      for (final symbol in _subscribedSymbols) {
+        _sendSubscription(symbol, true);
+      }
+      
+      print('[WebSocket] Connected successfully');
+    } catch (e) {
+      print('[WebSocket] Connection failed: $e');
+      _scheduleReconnect();
+    } finally {
+      _isConnecting = false;
+    }
+  }
+  
+  void _handleWebSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+      
+      if (data['type'] == 'quote') {
+        final quote = Quote.fromJson(data['data']);
+        _priceStreamController.add(quote);
+      } else if (data['type'] == 'pong') {
+        print('[WebSocket] Received pong');
+      }
+    } catch (e) {
+      print('[WebSocket] Error parsing message: $e');
+    }
+  }
+  
+  void _handleWebSocketError(error) {
+    print('[WebSocket] Error: $error');
+    _disconnect();
+    _scheduleReconnect();
+  }
+  
+  void _handleWebSocketClosed() {
+    print('[WebSocket] Connection closed');
+    _disconnect();
+    _scheduleReconnect();
+  }
+  
+  void _disconnect() {
+    _wsChannel?.sink.close();
+    _wsChannel = null;
+    _pingTimer?.cancel();
+    _pingTimer = null;
+  }
+  
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (_wsChannel == null && _subscribedSymbols.isNotEmpty) {
+        _connectWebSocket();
+      }
+    });
+  }
+  
+  void _startPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_wsChannel != null) {
+        _sendPing();
+      }
+    });
+  }
+  
+  void _sendPing() {
+    try {
+      _wsChannel?.sink.add(jsonEncode({
+        'type': 'ping',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      }));
+    } catch (e) {
+      print('[WebSocket] Failed to send ping: $e');
+    }
+  }
+  
+  void _sendSubscription(String symbol, bool subscribe) {
+    try {
+      _wsChannel?.sink.add(jsonEncode({
+        'type': subscribe ? 'subscribe' : 'unsubscribe',
+        'symbol': symbol,
+      }));
+    } catch (e) {
+      print('[WebSocket] Failed to send subscription: $e');
+    }
+  }
+  
+  // Symbol subscription management
+  void subscribeToSymbol(String symbol) {
+    _subscribedSymbols.add(symbol);
+    
+    if (_wsChannel == null) {
+      _connectWebSocket();
+    } else {
+      _sendSubscription(symbol, true);
+    }
+  }
+  
+  void unsubscribeFromSymbol(String symbol) {
+    _subscribedSymbols.remove(symbol);
+    
+    if (_wsChannel != null) {
+      _sendSubscription(symbol, false);
+    }
+    
+    // Disconnect if no more subscriptions
+    if (_subscribedSymbols.isEmpty) {
+      _disconnect();
+    }
+  }
+  
+  void updateSubscriptions(List<String> symbols) {
+    final currentSymbols = Set<String>.from(_subscribedSymbols);
+    final newSymbols = Set<String>.from(symbols);
+    
+    // Unsubscribe from removed symbols
+    for (final symbol in currentSymbols.difference(newSymbols)) {
+      unsubscribeFromSymbol(symbol);
+    }
+    
+    // Subscribe to new symbols
+    for (final symbol in newSymbols.difference(currentSymbols)) {
+      subscribeToSymbol(symbol);
+    }
+  }
+  
+  void dispose() {
+    _disconnect();
+    _reconnectTimer?.cancel();
+    _priceStreamController.close();
+  }
+}
+
+// Riverpod provider
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final client = ApiClient();
+  
+  ref.onDispose(() {
+    client.dispose();
+  });
+  
+  return client;
+});

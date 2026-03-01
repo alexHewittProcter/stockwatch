@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:stockwatch/theme/app_theme.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../theme/app_theme.dart';
 
-class AlertsScreen extends StatelessWidget {
+class AlertsScreen extends ConsumerWidget {
   const AlertsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      backgroundColor: AppTheme.primaryDark,
-      body: const Center(
-        child: Text(
-          'Alerts Screen\n(Coming Soon)',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 18,
-            color: AppTheme.textSecondary,
-          ),
+      backgroundColor: AppColors.background,
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Price & Movement Alerts', style: AppTextStyles.headingLarge),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Center(
+                child: Text(
+                  'Alerts screen implementation in progress...',
+                  style: AppTextStyles.bodyLarge.copyWith(color: AppColors.textMuted),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

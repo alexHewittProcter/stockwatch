@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/app_theme.dart';
 
-class PortfolioScreen extends ConsumerWidget {
-  const PortfolioScreen({super.key});
+class OpportunitiesScreen extends ConsumerWidget {
+  const OpportunitiesScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -14,12 +14,12 @@ class PortfolioScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Portfolio Management', style: AppTextStyles.headingLarge),
+            Text('Trading Opportunities', style: AppTextStyles.headingLarge),
             const SizedBox(height: 16),
             Expanded(
               child: Center(
                 child: Text(
-                  'Portfolio screen implementation in progress...',
+                  'Opportunities screen implementation in progress...',
                   style: AppTextStyles.bodyLarge.copyWith(color: AppColors.textMuted),
                 ),
               ),
