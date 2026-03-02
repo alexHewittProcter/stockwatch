@@ -458,6 +458,93 @@ class ApiClient {
       '/api/options/reversals',
     );
   }
+
+  // News API
+  Future<dynamic> getNewsFeed({
+    String tab = 'foryou',
+    List<String>? symbols,
+    List<String>? sources, 
+    String? sentiment,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final params = <String, String>{
+      'tab': tab,
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    };
+    
+    if (symbols != null && symbols.isNotEmpty) {
+      params['symbols'] = symbols.join(',');
+    }
+    if (sources != null && sources.isNotEmpty) {
+      params['sources'] = sources.join(',');
+    }
+    if (sentiment != null) {
+      params['sentiment'] = sentiment;
+    }
+
+    return await _request<dynamic>(
+      'GET',
+      '/api/news/feed',
+      queryParameters: params,
+    );
+  }
+
+  Future<dynamic> getNewsArticle(String id) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/news/article/$id',
+    );
+  }
+
+  Future<dynamic> getNewsSources() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/news/sources',
+    );
+  }
+
+  // Social API
+  Future<dynamic> getSocialTrending({String period = '24h'}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/social/trending',
+      queryParameters: {'period': period},
+    );
+  }
+
+  Future<dynamic> getSocialSentiment(String symbol, {String period = '24h'}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/social/sentiment/$symbol',
+      queryParameters: {'period': period},
+    );
+  }
+
+  Future<dynamic> getRedditHotPosts({int limit = 100}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/social/reddit/hot',
+      queryParameters: {'limit': limit.toString()},
+    );
+  }
+
+  Future<dynamic> getSubredditPosts(String subreddit, {int limit = 50}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/social/reddit/$subreddit',
+      queryParameters: {'limit': limit.toString()},
+    );
+  }
+
+  Future<dynamic> getHypeAlerts({int hours = 24}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/social/hype',
+      queryParameters: {'hours': hours.toString()},
+    );
+  }
   
   // Opportunities API
   Future<List<dynamic>> getOpportunities() async {
