@@ -1,12 +1,106 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart';
+import 'dart:async';
+
 import '../theme/app_theme.dart';
 import '../services/api_client.dart';
 
+class SearchResult {
+  final String id;
+  final String title;
+  final String? subtitle;
+  final String type;
+  final Map<String, dynamic> data;
+  final double relevance;
+  final List<SearchAction>? quickActions;
+
+  SearchResult({
+    required this.id,
+    required this.title,
+    this.subtitle,
+    required this.type,
+    required this.data,
+    required this.relevance,
+    this.quickActions,
+  });
+
+  factory SearchResult.fromJson(Map<String, dynamic> json) {
+    return SearchResult(
+      id: json['id'] ?? '',
+      title: json['title'] ?? '',
+      subtitle: json['subtitle'],
+      type: json['type'] ?? '',
+      data: Map<String, dynamic>.from(json['data'] ?? {}),
+      relevance: (json['relevance'] ?? 0).toDouble(),
+      quickActions: (json['quickActions'] as List<dynamic>?)
+          ?.map((item) => SearchAction.fromJson(item))
+          .toList(),
+    );
+  }
+
+  IconData get typeIcon {
+    switch (type) {
+      case 'symbol':
+        return Icons.trending_up;
+      case 'holder':
+        return Icons.business;
+      case 'dashboard':
+        return Icons.dashboard;
+      case 'report':
+        return Icons.description;
+      case 'condition':
+        return Icons.rule;
+      case 'pattern':
+        return Icons.psychology;
+      default:
+        return Icons.search;
+    }
+  }
+
+  Color get typeColor {
+    switch (type) {
+      case 'symbol':
+        return AppColors.primary;
+      case 'holder':
+        return AppColors.success;
+      case 'dashboard':
+        return AppColors.warning;
+      case 'report':
+        return Colors.orange;
+      case 'condition':
+        return Colors.purple;
+      case 'pattern':
+        return Colors.teal;
+      default:
+        return AppColors.textMuted;
+    }
+  }
+}
+
+class SearchAction {
+  final String label;
+  final String action;
+  final Map<String, dynamic>? params;
+
+  SearchAction({
+    required this.label,
+    required this.action,
+    this.params,
+  });
+
+  factory SearchAction.fromJson(Map<String, dynamic> json) {
+    return SearchAction(
+      label: json['label'] ?? '',
+      action: json['action'] ?? '',
+      params: json['params'] != null ? Map<String, dynamic>.from(json['params']) : null,
+    );
+  }
+}
+
 class GlobalSearchOverlay extends ConsumerStatefulWidget {
-  const GlobalSearchOverlay({super.key});
+  final VoidCallback? onClose;
+
+  const GlobalSearchOverlay({super.key, this.onClose});
 
   @override
   ConsumerState<GlobalSearchOverlay> createState() => _GlobalSearchOverlayState();
@@ -14,136 +108,68 @@ class GlobalSearchOverlay extends ConsumerStatefulWidget {
 
 class _GlobalSearchOverlayState extends ConsumerState<GlobalSearchOverlay>
     with SingleTickerProviderStateMixin {
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
+  late Animation<double> _scaleAnimation;
 
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+  Timer? _debounceTimer;
+  List<SearchResult> _results = [];
+  List<SearchResult> _recentResults = [];
+  bool _isLoading = false;
+  int _selectedIndex = -1;
 
   @override
   void initState() {
     super.initState();
     
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOut,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
     
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -0.1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOut,
-    ));
-    
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+
     _animationController.forward();
     
-    // Auto-focus search field
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+      _searchFocus.requestFocus();
+      _loadRecentSearches();
     });
+
+    _searchController.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _animationController.dispose();
     _searchController.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _closeSearch() {
-    _animationController.reverse().then((_) {
-      ref.read(isSearchActiveProvider.notifier).state = false;
-      ref.read(searchQueryProvider.notifier).state = '';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final searchQuery = ref.watch(searchQueryProvider);
-
-    return GestureDetector(
-      onTap: _closeSearch,
-      child: AnimatedBuilder(
-        animation: _fadeAnimation,
-        builder: (context, child) {
-          return Container(
-            color: Colors.black.withOpacity(0.5 * _fadeAnimation.value),
-            child: Center(
-              child: SlideTransition(
-                position: _slideAnimation,
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: _SearchDialog(
-                    searchController: _searchController,
-                    focusNode: _focusNode,
-                    onClose: _closeSearch,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SearchDialog extends ConsumerStatefulWidget {
-  final TextEditingController searchController;
-  final FocusNode focusNode;
-  final VoidCallback onClose;
-
-  const _SearchDialog({
-    required this.searchController,
-    required this.focusNode,
-    required this.onClose,
-  });
-
-  @override
-  ConsumerState<_SearchDialog> createState() => _SearchDialogState();
-}
-
-class _SearchDialogState extends ConsumerState<_SearchDialog> {
-  List<SearchResult> _results = [];
-  bool _isLoading = false;
-  int _selectedIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.searchController.addListener(_onSearchChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.searchController.removeListener(_onSearchChanged);
+    _searchFocus.dispose();
     super.dispose();
   }
 
   void _onSearchChanged() {
-    final query = widget.searchController.text;
-    ref.read(searchQueryProvider.notifier).state = query;
+    final query = _searchController.text.trim();
     
-    if (query.isNotEmpty) {
-      _performSearch(query);
-    } else {
-      setState(() {
-        _results = [];
-        _selectedIndex = 0;
-      });
-    }
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (query.isNotEmpty) {
+        _performSearch(query);
+      } else {
+        setState(() {
+          _results = [];
+          _selectedIndex = -1;
+        });
+      }
+    });
   }
 
   Future<void> _performSearch(String query) async {
@@ -152,361 +178,405 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
     });
 
     try {
-      // Search symbols
       final apiClient = ref.read(apiClientProvider);
-      final symbolResults = await apiClient.searchSymbols(query);
+      final response = await apiClient.globalSearch(query: query, limit: 10);
       
-      // Create search results
-      final results = <SearchResult>[];
-      
-      // Add symbol results
-      for (final symbol in symbolResults.take(8)) {
-        results.add(SearchResult(
-          type: SearchResultType.symbol,
-          title: symbol['symbol'] ?? '',
-          subtitle: symbol['description'] ?? '',
-          data: symbol,
-          icon: Icons.trending_up,
-        ));
-      }
-      
-      // Add quick navigation results
-      final navigationResults = _getNavigationResults(query);
-      results.addAll(navigationResults.take(5));
-      
+      final results = (response['results'] as List<dynamic>?)
+          ?.map((item) => SearchResult.fromJson(item))
+          .toList() ?? [];
+
       setState(() {
         _results = results;
-        _selectedIndex = 0;
+        _selectedIndex = results.isNotEmpty ? 0 : -1;
         _isLoading = false;
       });
     } catch (e) {
       setState(() {
+        _results = [];
+        _selectedIndex = -1;
         _isLoading = false;
       });
-      print('Search error: $e');
     }
   }
 
-  List<SearchResult> _getNavigationResults(String query) {
-    final navigation = [
-      {'title': 'Home', 'page': 0, 'icon': Icons.home},
-      {'title': 'Dashboard', 'page': 1, 'icon': Icons.dashboard},
-      {'title': 'Portfolio', 'page': 9, 'icon': Icons.pie_chart},
-      {'title': 'Options', 'page': 5, 'icon': Icons.swap_horiz},
-      {'title': 'News', 'page': 6, 'icon': Icons.article},
-      {'title': 'Opportunities', 'page': 7, 'icon': Icons.lightbulb},
-      {'title': 'Holders', 'page': 3, 'icon': Icons.groups},
-      {'title': 'Reports', 'page': 8, 'icon': Icons.description},
-      {'title': 'Trade Journal', 'page': 10, 'icon': Icons.book},
-      {'title': 'Alerts', 'page': 11, 'icon': Icons.notifications},
-      {'title': 'Settings', 'page': 12, 'icon': Icons.settings},
-    ];
-    
-    return navigation
-        .where((nav) => nav['title']!.toString().toLowerCase().contains(query.toLowerCase()))
-        .map((nav) => SearchResult(
-              type: SearchResultType.navigation,
-              title: nav['title']! as String,
-              subtitle: 'Navigate to ${nav['title']}',
-              data: nav,
-              icon: nav['icon']! as IconData,
-            ))
-        .toList();
+  Future<void> _loadRecentSearches() async {
+    try {
+      final apiClient = ref.read(apiClientProvider);
+      final response = await apiClient.getRecentSearches(limit: 5);
+      
+      final results = (response['results'] as List<dynamic>?)
+          ?.map((item) => SearchResult.fromJson(item))
+          .toList() ?? [];
+
+      setState(() {
+        _recentResults = results;
+      });
+    } catch (e) {
+      // Silently fail for recent searches
+    }
   }
 
-  void _handleKeyPress(RawKeyEvent event) {
-    if (event is RawKeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        setState(() {
-          _selectedIndex = (_selectedIndex + 1) % _results.length;
-        });
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        setState(() {
-          _selectedIndex = (_selectedIndex - 1) % _results.length;
-        });
-      } else if (event.logicalKey == LogicalKeyboardKey.enter) {
-        _selectResult(_results[_selectedIndex]);
-      } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-        widget.onClose();
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final currentResults = _results.isNotEmpty ? _results : _recentResults;
+      
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.arrowDown:
+          setState(() {
+            _selectedIndex = (_selectedIndex + 1) % currentResults.length;
+          });
+          break;
+          
+        case LogicalKeyboardKey.arrowUp:
+          setState(() {
+            _selectedIndex = _selectedIndex <= 0 
+                ? currentResults.length - 1 
+                : _selectedIndex - 1;
+          });
+          break;
+          
+        case LogicalKeyboardKey.enter:
+          if (_selectedIndex >= 0 && _selectedIndex < currentResults.length) {
+            _selectResult(currentResults[_selectedIndex]);
+          }
+          break;
+          
+        case LogicalKeyboardKey.escape:
+          _close();
+          break;
       }
     }
   }
 
   void _selectResult(SearchResult result) {
+    // Handle result selection based on type
     switch (result.type) {
-      case SearchResultType.symbol:
-        // Navigate to stock detail and set selected symbol
-        ref.read(selectedSymbolProvider.notifier).state = result.title;
-        ref.read(currentPageProvider.notifier).state = 2; // Stock detail page
+      case 'symbol':
+        _handleSymbolResult(result);
         break;
-      case SearchResultType.navigation:
-        final page = result.data['page'] as int;
-        ref.read(currentPageProvider.notifier).state = page;
+      case 'dashboard':
+        _handleDashboardResult(result);
+        break;
+      case 'holder':
+        _handleHolderResult(result);
+        break;
+      case 'report':
+        _handleReportResult(result);
+        break;
+      case 'condition':
+        _handleConditionResult(result);
+        break;
+      case 'pattern':
+        _handlePatternResult(result);
         break;
     }
     
-    widget.onClose();
+    _close();
+  }
+
+  void _handleSymbolResult(SearchResult result) {
+    final symbol = result.data['symbol'] as String;
+    // TODO: Navigate to symbol detail or add to dashboard
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Selected symbol: $symbol')),
+    );
+  }
+
+  void _handleDashboardResult(SearchResult result) {
+    final dashboardId = result.data['id'] as String;
+    // TODO: Navigate to dashboard
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Opening dashboard: ${result.title}')),
+    );
+  }
+
+  void _handleHolderResult(SearchResult result) {
+    // TODO: Navigate to holder detail
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Selected holder: ${result.title}')),
+    );
+  }
+
+  void _handleReportResult(SearchResult result) {
+    // TODO: Navigate to report detail
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Opening report: ${result.title}')),
+    );
+  }
+
+  void _handleConditionResult(SearchResult result) {
+    // TODO: Navigate to condition detail
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Selected condition: ${result.title}')),
+    );
+  }
+
+  void _handlePatternResult(SearchResult result) {
+    // TODO: Navigate to pattern detail
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Selected pattern: ${result.title}')),
+    );
+  }
+
+  void _close() async {
+    await _animationController.reverse();
+    if (widget.onClose != null) {
+      widget.onClose!();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {}, // Prevent closing when tapping the dialog
-      child: RawKeyboardListener(
-        focusNode: FocusNode(),
-        onKey: _handleKeyPress,
-        child: Container(
-          width: 600,
-          constraints: const BoxConstraints(maxHeight: 400),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Search input
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: AppColors.border)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search, color: AppColors.textMuted),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextField(
-                        controller: widget.searchController,
-                        focusNode: widget.focusNode,
-                        decoration: const InputDecoration(
-                          hintText: 'Search symbols, news, or navigate...',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        style: AppTextStyles.bodyLarge,
-                      ),
+      onTap: _close,
+      child: Scaffold(
+        backgroundColor: Colors.black.withOpacity(0.5),
+        body: Focus(
+          onKeyEvent: (node, event) {
+            _handleKeyEvent(event);
+            return KeyEventResult.handled;
+          },
+          child: AnimatedBuilder(
+            animation: _animationController,
+            builder: (context, child) {
+              return FadeTransition(
+                opacity: _fadeAnimation,
+                child: ScaleTransition(
+                  scale: _scaleAnimation,
+                  child: Center(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 40),
+                      constraints: const BoxConstraints(maxWidth: 600),
+                      child: _buildSearchPanel(),
                     ),
-                    if (_isLoading) ...[
-                      const SizedBox(width: 12),
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: 12),
-                    Text(
-                      'ESC',
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              // Search results
-              if (_results.isNotEmpty) ...[
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _results.length,
-                    itemBuilder: (context, index) {
-                      final result = _results[index];
-                      final isSelected = index == _selectedIndex;
-                      
-                      return _SearchResultItem(
-                        result: result,
-                        isSelected: isSelected,
-                        onTap: () => _selectResult(result),
-                      );
-                    },
                   ),
                 ),
-              ] else if (widget.searchController.text.isNotEmpty && !_isLoading) ...[
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.search_off,
-                        size: 48,
-                        color: AppColors.textMuted,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No results found',
-                        style: AppTextStyles.bodyLarge.copyWith(
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.search,
-                        size: 48,
-                        color: AppColors.textMuted,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Search for stocks, news, or navigate to any screen',
-                        style: AppTextStyles.bodyLarge.copyWith(
-                          color: AppColors.textMuted,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '↑↓ to navigate • Enter to select • Esc to close',
-                        style: AppTextStyles.caption.copyWith(
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
+              );
+            },
           ),
         ),
       ),
     );
   }
-}
 
-class _SearchResultItem extends StatelessWidget {
-  final SearchResult result;
-  final bool isSelected;
-  final VoidCallback onTap;
+  Widget _buildSearchPanel() {
+    return GestureDetector(
+      onTap: () {}, // Prevent closing when tapping on the panel
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSearchInput(),
+            if (_isLoading) _buildLoadingIndicator(),
+            if (!_isLoading && _results.isNotEmpty) _buildResults(_results),
+            if (!_isLoading && _results.isEmpty && _searchController.text.isEmpty && _recentResults.isNotEmpty)
+              _buildRecentSection(),
+            if (!_isLoading && _results.isEmpty && _searchController.text.isNotEmpty)
+              _buildNoResults(),
+          ],
+        ),
+      ),
+    );
+  }
 
-  const _SearchResultItem({
-    required this.result,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: isSelected ? AppColors.selectionBackground : Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: _getIconBackgroundColor(),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(
-                  result.icon,
-                  size: 18,
-                  color: _getIconColor(),
-                ),
+  Widget _buildSearchInput() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          Icon(Icons.search, color: AppColors.textMuted, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocus,
+              decoration: InputDecoration(
+                hintText: 'Search symbols, holders, dashboards...',
+                hintStyle: TextStyle(color: AppColors.textMuted),
+                border: InputBorder.none,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      result.title,
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    if (result.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        result.subtitle,
-                        style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+              style: AppTextStyles.bodyLarge,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.background,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Text(
+              'ESC',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textMuted,
+                fontFamily: 'monospace',
               ),
-              if (result.type == SearchResultType.symbol) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.info.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    'STOCK',
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.info,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: const CircularProgressIndicator(),
+    );
+  }
+
+  Widget _buildResults(List<SearchResult> results) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 300),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: results.length,
+        itemBuilder: (context, index) {
+          final result = results[index];
+          final isSelected = index == _selectedIndex;
+          
+          return _buildResultItem(result, isSelected, index);
+        },
+      ),
+    );
+  }
+
+  Widget _buildResultItem(SearchResult result, bool isSelected, int index) {
+    return GestureDetector(
+      onTap: () => _selectResult(result),
+      onHover: (hovering) {
+        if (hovering) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withOpacity(0.1) : null,
+          border: Border(
+            left: BorderSide(
+              color: isSelected ? AppColors.primary : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: result.typeColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(
+                result.typeIcon,
+                size: 16,
+                color: result.typeColor,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    result.title,
+                    style: AppTextStyles.bodyMedium.copyWith(
                       fontWeight: FontWeight.w600,
+                      color: isSelected ? AppColors.primary : AppColors.text,
                     ),
                   ),
-                ),
-              ],
-            ],
-          ),
+                  if (result.subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      result.subtitle!,
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Color _getIconBackgroundColor() {
-    switch (result.type) {
-      case SearchResultType.symbol:
-        return AppColors.info.withOpacity(0.2);
-      case SearchResultType.navigation:
-        return AppColors.surfaceVariant;
-    }
+  Widget _buildRecentSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          child: Text(
+            'Recent',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 200),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _recentResults.length,
+            itemBuilder: (context, index) {
+              final result = _recentResults[index];
+              final isSelected = index == _selectedIndex;
+              
+              return _buildResultItem(result, isSelected, index);
+            },
+          ),
+        ),
+      ],
+    );
   }
 
-  Color _getIconColor() {
-    switch (result.type) {
-      case SearchResultType.symbol:
-        return AppColors.info;
-      case SearchResultType.navigation:
-        return AppColors.textSecondary;
-    }
+  Widget _buildNoResults() {
+    return Container(
+      padding: const EdgeInsets.all(40),
+      child: Column(
+        children: [
+          Icon(
+            Icons.search_off,
+            size: 48,
+            color: AppColors.textMuted,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No results found',
+            style: AppTextStyles.bodyLarge.copyWith(
+              color: AppColors.textMuted,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Try searching for symbols, holders, or dashboards',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textMuted,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
-}
-
-enum SearchResultType {
-  symbol,
-  navigation,
-}
-
-class SearchResult {
-  final SearchResultType type;
-  final String title;
-  final String subtitle;
-  final Map<String, dynamic> data;
-  final IconData icon;
-
-  SearchResult({
-    required this.type,
-    required this.title,
-    required this.subtitle,
-    required this.data,
-    required this.icon,
-  });
 }

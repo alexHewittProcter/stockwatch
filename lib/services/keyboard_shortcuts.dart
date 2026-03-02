@@ -1,299 +1,308 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart';
+import 'package:flutter/material.dart';
 
-// Intent classes for keyboard shortcuts
-class GlobalSearchIntent extends Intent {
-  const GlobalSearchIntent();
+/**
+ * Keyboard Shortcuts Service
+ * 
+ * Manages global keyboard shortcuts for StockWatch.
+ */
+
+enum StockWatchShortcut {
+  globalSearch,     // Cmd+K
+  refresh,          // Cmd+R
+  newDashboard,     // Cmd+N
+  newTrade,         // Cmd+T
+  settings,         // Cmd+,
+  help,             // Cmd+/
+  filter,           // Cmd+F
+  dashboard1,       // Cmd+1
+  dashboard2,       // Cmd+2
+  dashboard3,       // Cmd+3
+  dashboard4,       // Cmd+4
+  dashboard5,       // Cmd+5
+  dashboard6,       // Cmd+6
+  dashboard7,       // Cmd+7
+  dashboard8,       // Cmd+8
+  dashboard9,       // Cmd+9
+  escape,           // Escape
 }
 
-class RefreshIntent extends Intent {
-  const RefreshIntent();
-}
+class KeyboardShortcutService {
+  static final KeyboardShortcutService _instance = KeyboardShortcutService._internal();
+  factory KeyboardShortcutService() => _instance;
+  KeyboardShortcutService._internal();
 
-class NewDashboardIntent extends Intent {
-  const NewDashboardIntent();
-}
+  final Map<StockWatchShortcut, VoidCallback?> _handlers = {};
+  final Map<LogicalKeySet, StockWatchShortcut> _keyMappings = {};
 
-class EscapeIntent extends Intent {
-  const EscapeIntent();
-}
+  bool _initialized = false;
 
-class QuickSymbolIntent extends Intent {
-  const QuickSymbolIntent();
-}
+  void initialize() {
+    if (_initialized) return;
 
-class KeyboardShortcuts {
-  // Define keyboard shortcuts
-  static const Map<ShortcutActivator, Intent> shortcuts = {
-    // Cmd+K for global search (macOS)
-    SingleActivator(LogicalKeyboardKey.keyK, meta: true): GlobalSearchIntent(),
-    
-    // Cmd+R for refresh
-    SingleActivator(LogicalKeyboardKey.keyR, meta: true): RefreshIntent(),
-    
-    // Cmd+N for new dashboard
-    SingleActivator(LogicalKeyboardKey.keyN, meta: true): NewDashboardIntent(),
-    
-    // Escape to close overlays/search
-    SingleActivator(LogicalKeyboardKey.escape): EscapeIntent(),
-    
-    // Cmd+T for quick symbol lookup
-    SingleActivator(LogicalKeyboardKey.keyT, meta: true): QuickSymbolIntent(),
-    
-    // Cmd+1-9 for quick dashboard switching
-    SingleActivator(LogicalKeyboardKey.digit1, meta: true): SwitchDashboardIntent(0),
-    SingleActivator(LogicalKeyboardKey.digit2, meta: true): SwitchDashboardIntent(1),
-    SingleActivator(LogicalKeyboardKey.digit3, meta: true): SwitchDashboardIntent(2),
-    SingleActivator(LogicalKeyboardKey.digit4, meta: true): SwitchDashboardIntent(3),
-    SingleActivator(LogicalKeyboardKey.digit5, meta: true): SwitchDashboardIntent(4),
-    SingleActivator(LogicalKeyboardKey.digit6, meta: true): SwitchDashboardIntent(5),
-    SingleActivator(LogicalKeyboardKey.digit7, meta: true): SwitchDashboardIntent(6),
-    SingleActivator(LogicalKeyboardKey.digit8, meta: true): SwitchDashboardIntent(7),
-    SingleActivator(LogicalKeyboardKey.digit9, meta: true): SwitchDashboardIntent(8),
-  };
-  
-  // Create actions for the shortcuts
-  static Map<Type, Action<Intent>> getActions(WidgetRef ref) {
-    return {
-      GlobalSearchIntent: GlobalSearchAction(ref),
-      RefreshIntent: RefreshAction(ref),
-      NewDashboardIntent: NewDashboardAction(ref),
-      EscapeIntent: EscapeAction(ref),
-      QuickSymbolIntent: QuickSymbolAction(ref),
-      SwitchDashboardIntent: SwitchDashboardAction(ref),
-    };
+    // Initialize key mappings
+    _setupKeyMappings();
+    _initialized = true;
   }
-}
 
-// Dashboard switching intent with index
-class SwitchDashboardIntent extends Intent {
-  final int index;
-  const SwitchDashboardIntent(this.index);
-}
+  void _setupKeyMappings() {
+    _keyMappings.clear();
 
-// Action implementations
-class GlobalSearchAction extends Action<GlobalSearchIntent> {
-  final WidgetRef ref;
-  
-  GlobalSearchAction(this.ref);
-  
-  @override
-  void invoke(GlobalSearchIntent intent) {
-    // Activate search mode
-    ref.read(isSearchActiveProvider.notifier).state = true;
-    ref.read(searchQueryProvider.notifier).state = '';
+    // Meta key (Cmd on macOS, Ctrl on others)
+    final metaKey = defaultTargetPlatform == TargetPlatform.macOS
+        ? LogicalKeyboardKey.meta
+        : LogicalKeyboardKey.control;
+
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.keyK)] = StockWatchShortcut.globalSearch;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.keyR)] = StockWatchShortcut.refresh;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.keyN)] = StockWatchShortcut.newDashboard;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.keyT)] = StockWatchShortcut.newTrade;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.comma)] = StockWatchShortcut.settings;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.slash)] = StockWatchShortcut.help;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.keyF)] = StockWatchShortcut.filter;
+
+    // Dashboard shortcuts
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit1)] = StockWatchShortcut.dashboard1;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit2)] = StockWatchShortcut.dashboard2;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit3)] = StockWatchShortcut.dashboard3;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit4)] = StockWatchShortcut.dashboard4;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit5)] = StockWatchShortcut.dashboard5;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit6)] = StockWatchShortcut.dashboard6;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit7)] = StockWatchShortcut.dashboard7;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit8)] = StockWatchShortcut.dashboard8;
+    _keyMappings[LogicalKeySet(metaKey, LogicalKeyboardKey.digit9)] = StockWatchShortcut.dashboard9;
+
+    // Escape key
+    _keyMappings[LogicalKeySet(LogicalKeyboardKey.escape)] = StockWatchShortcut.escape;
   }
-}
 
-class RefreshAction extends Action<RefreshIntent> {
-  final WidgetRef ref;
-  
-  RefreshAction(this.ref);
-  
-  @override
-  void invoke(RefreshIntent intent) {
-    // Refresh current screen data
-    // This would trigger a refresh of the current page's data
-    print('Refresh triggered via keyboard shortcut');
-    
-    // Clear any cached data and force refresh
-    // Implementation would depend on the current screen
-    _refreshCurrentScreen();
+  void registerHandler(StockWatchShortcut shortcut, VoidCallback? handler) {
+    _handlers[shortcut] = handler;
   }
-  
-  void _refreshCurrentScreen() {
-    final currentPage = ref.read(currentPageProvider);
+
+  void unregisterHandler(StockWatchShortcut shortcut) {
+    _handlers.remove(shortcut);
+  }
+
+  void clearAllHandlers() {
+    _handlers.clear();
+  }
+
+  bool handleKeyEvent(KeyEvent event) {
+    if (!_initialized) return false;
+    if (event is! KeyDownEvent) return false;
+
+    final keysPressed = HardwareKeyboard.instance.logicalKeysPressed;
     
-    switch (currentPage) {
-      case 0: // Home/Overview
-        // Refresh market summary, top movers
-        break;
-      case 1: // Dashboard
-        // Refresh dashboard widgets
-        break;
-      case 2: // Stock Detail
-        // Refresh stock data
-        break;
-      default:
-        break;
+    for (final keyMapping in _keyMappings.entries) {
+      if (_keySetMatches(keyMapping.key, keysPressed)) {
+        final handler = _handlers[keyMapping.value];
+        if (handler != null) {
+          handler();
+          return true;
+        }
+      }
     }
+
+    return false;
   }
-}
 
-class NewDashboardAction extends Action<NewDashboardIntent> {
-  final WidgetRef ref;
-  
-  NewDashboardAction(this.ref);
-  
-  @override
-  void invoke(NewDashboardIntent intent) {
-    // Navigate to dashboard creator or show new dashboard dialog
-    print('New dashboard triggered via keyboard shortcut');
-    ref.read(dashboardEditModeProvider.notifier).state = true;
+  bool _keySetMatches(LogicalKeySet keySet, Set<LogicalKeyboardKey> pressed) {
+    if (keySet.keys.length != pressed.length) return false;
+    return keySet.keys.every((key) => pressed.contains(key));
   }
-}
 
-class EscapeAction extends Action<EscapeIntent> {
-  final WidgetRef ref;
-  
-  EscapeAction(this.ref);
-  
-  @override
-  void invoke(EscapeIntent intent) {
-    // Close any open overlays, search, or edit modes
-    final isSearchActive = ref.read(isSearchActiveProvider);
-    final isDashboardEditMode = ref.read(dashboardEditModeProvider);
-    
-    if (isSearchActive) {
-      ref.read(isSearchActiveProvider.notifier).state = false;
-      ref.read(searchQueryProvider.notifier).state = '';
-    } else if (isDashboardEditMode) {
-      ref.read(dashboardEditModeProvider.notifier).state = false;
-    }
-  }
-}
+  Widget buildShortcutsWrapper({required Widget child}) {
+    if (!_initialized) initialize();
 
-class QuickSymbolAction extends Action<QuickSymbolIntent> {
-  final WidgetRef ref;
-  
-  QuickSymbolAction(this.ref);
-  
-  @override
-  void invoke(QuickSymbolIntent intent) {
-    // Show quick symbol lookup dialog
-    print('Quick symbol lookup triggered via keyboard shortcut');
-    _showQuickSymbolDialog();
-  }
-  
-  void _showQuickSymbolDialog() {
-    // Implementation would show a dialog for quick symbol entry
-    // This would be similar to search but focused on stock symbols
-  }
-}
-
-class SwitchDashboardAction extends Action<SwitchDashboardIntent> {
-  final WidgetRef ref;
-  
-  SwitchDashboardAction(this.ref);
-  
-  @override
-  void invoke(SwitchDashboardIntent intent) {
-    // Switch to dashboard at specified index
-    print('Switch to dashboard ${intent.index} via keyboard shortcut');
-    
-    // This would require a list of available dashboards
-    // For now, just navigate to dashboard screen
-    ref.read(currentPageProvider.notifier).state = 1; // Dashboard page
-  }
-}
-
-// Utility widget to display keyboard shortcuts in help/settings
-class KeyboardShortcutsHelp extends StatelessWidget {
-  const KeyboardShortcutsHelp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final shortcuts = [
-      KeyboardShortcutInfo(
-        keys: 'Cmd + K',
-        description: 'Global search',
-        icon: Icons.search,
-      ),
-      KeyboardShortcutInfo(
-        keys: 'Cmd + R',
-        description: 'Refresh current screen',
-        icon: Icons.refresh,
-      ),
-      KeyboardShortcutInfo(
-        keys: 'Cmd + N',
-        description: 'Create new dashboard',
-        icon: Icons.add_circle_outline,
-      ),
-      KeyboardShortcutInfo(
-        keys: 'Cmd + T',
-        description: 'Quick symbol lookup',
-        icon: Icons.trending_up,
-      ),
-      KeyboardShortcutInfo(
-        keys: 'Escape',
-        description: 'Close overlays/exit edit mode',
-        icon: Icons.close,
-      ),
-      KeyboardShortcutInfo(
-        keys: 'Cmd + 1-9',
-        description: 'Switch to dashboard',
-        icon: Icons.dashboard,
-      ),
-    ];
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Keyboard Shortcuts',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ...shortcuts.map((shortcut) => KeyboardShortcutRow(shortcut: shortcut)),
-          ],
-        ),
-      ),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (handleKeyEvent(event)) {
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: child,
     );
   }
+
+  Map<StockWatchShortcut, String> getShortcutDescriptions() {
+    final metaSymbol = defaultTargetPlatform == TargetPlatform.macOS ? '⌘' : 'Ctrl';
+    
+    return {
+      StockWatchShortcut.globalSearch: '$metaSymbol+K - Global search',
+      StockWatchShortcut.refresh: '$metaSymbol+R - Refresh current view',
+      StockWatchShortcut.newDashboard: '$metaSymbol+N - New dashboard',
+      StockWatchShortcut.newTrade: '$metaSymbol+T - New trade',
+      StockWatchShortcut.settings: '$metaSymbol+, - Settings',
+      StockWatchShortcut.help: '$metaSymbol+/ - Keyboard shortcuts help',
+      StockWatchShortcut.filter: '$metaSymbol+F - Filter current view',
+      StockWatchShortcut.dashboard1: '$metaSymbol+1 - Switch to dashboard 1',
+      StockWatchShortcut.dashboard2: '$metaSymbol+2 - Switch to dashboard 2',
+      StockWatchShortcut.dashboard3: '$metaSymbol+3 - Switch to dashboard 3',
+      StockWatchShortcut.dashboard4: '$metaSymbol+4 - Switch to dashboard 4',
+      StockWatchShortcut.dashboard5: '$metaSymbol+5 - Switch to dashboard 5',
+      StockWatchShortcut.dashboard6: '$metaSymbol+6 - Switch to dashboard 6',
+      StockWatchShortcut.dashboard7: '$metaSymbol+7 - Switch to dashboard 7',
+      StockWatchShortcut.dashboard8: '$metaSymbol+8 - Switch to dashboard 8',
+      StockWatchShortcut.dashboard9: '$metaSymbol+9 - Switch to dashboard 9',
+      StockWatchShortcut.escape: 'Escape - Close modal/overlay',
+    };
+  }
+
+  List<Map<String, String>> getShortcutsList() {
+    final descriptions = getShortcutDescriptions();
+    return descriptions.entries.map((entry) {
+      final parts = entry.value.split(' - ');
+      return {
+        'shortcut': parts[0],
+        'description': parts.length > 1 ? parts[1] : '',
+      };
+    }).toList();
+  }
 }
 
-class KeyboardShortcutInfo {
-  final String keys;
-  final String description;
-  final IconData icon;
+class KeyboardShortcutHandler extends StatefulWidget {
+  final Widget child;
+  final Map<StockWatchShortcut, VoidCallback>? shortcuts;
 
-  KeyboardShortcutInfo({
-    required this.keys,
-    required this.description,
-    required this.icon,
+  const KeyboardShortcutHandler({
+    super.key,
+    required this.child,
+    this.shortcuts,
   });
+
+  @override
+  State<KeyboardShortcutHandler> createState() => _KeyboardShortcutHandlerState();
 }
 
-class KeyboardShortcutRow extends StatelessWidget {
-  final KeyboardShortcutInfo shortcut;
+class _KeyboardShortcutHandlerState extends State<KeyboardShortcutHandler> {
+  final _shortcutService = KeyboardShortcutService();
 
-  const KeyboardShortcutRow({super.key, required this.shortcut});
+  @override
+  void initState() {
+    super.initState();
+    _registerShortcuts();
+  }
+
+  @override
+  void didUpdateWidget(KeyboardShortcutHandler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.shortcuts != oldWidget.shortcuts) {
+      _registerShortcuts();
+    }
+  }
+
+  @override
+  void dispose() {
+    _shortcutService.clearAllHandlers();
+    super.dispose();
+  }
+
+  void _registerShortcuts() {
+    _shortcutService.clearAllHandlers();
+    
+    if (widget.shortcuts != null) {
+      widget.shortcuts!.forEach((shortcut, callback) {
+        _shortcutService.registerHandler(shortcut, callback);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Icon(shortcut.icon, size: 20),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              border: Border.all(color: Theme.of(context).colorScheme.outline),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              shortcut.keys,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-              ),
-            ),
+    return _shortcutService.buildShortcutsWrapper(child: widget.child);
+  }
+}
+
+// Helper widget for keyboard shortcut help overlay
+class KeyboardShortcutHelp extends StatelessWidget {
+  final VoidCallback? onClose;
+
+  const KeyboardShortcutHelp({super.key, this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    final shortcuts = KeyboardShortcutService().getShortcutsList();
+    
+    return Container(
+      padding: const EdgeInsets.all(24),
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(shortcut.description),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Keyboard Shortcuts',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (onClose != null)
+                IconButton(
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: shortcuts.length,
+              itemBuilder: (context, index) {
+                final shortcut = shortcuts[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.grey[800]
+                              : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          shortcut['shortcut']!,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Colors.grey[300]
+                                : Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          shortcut['description']!,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),

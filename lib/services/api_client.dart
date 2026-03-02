@@ -694,6 +694,77 @@ class ApiClient {
       queryParameters: params.isNotEmpty ? params : null,
     );
   }
+
+  // Search API
+  Future<dynamic> globalSearch({
+    required String query,
+    List<String>? types,
+    int? limit,
+    bool includeActions = true,
+  }) async {
+    final params = <String, String>{
+      'q': query,
+      'actions': includeActions.toString(),
+    };
+    
+    if (types != null && types.isNotEmpty) {
+      params['types'] = types.join(',');
+    }
+    if (limit != null) {
+      params['limit'] = limit.toString();
+    }
+
+    return await _request<dynamic>(
+      'GET',
+      '/api/search',
+      queryParameters: params,
+    );
+  }
+
+  Future<dynamic> getRecentSearches({int limit = 10}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/search/recent',
+      queryParameters: {'limit': limit.toString()},
+    );
+  }
+
+  Future<dynamic> getSearchSuggestions(String type, {String query = ''}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/search/suggestions/$type',
+      queryParameters: query.isNotEmpty ? {'q': query} : null,
+    );
+  }
+
+  // Export API
+  Future<String> exportData(String type, {String format = 'json'}) async {
+    final response = await _httpClient.get(
+      Uri.parse('$baseUrl/api/export/$type?format=$format'),
+      headers: _headers,
+    );
+    
+    if (response.statusCode == 200) {
+      return response.body;
+    } else {
+      throw Exception('Export failed: ${response.statusCode}');
+    }
+  }
+
+  Future<dynamic> getExportInfo() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/export/info/available',
+    );
+  }
+
+  // Health API
+  Future<dynamic> getHealthMetrics() async {
+    return await _request<dynamic>(
+      'GET',
+      '/health/metrics',
+    );
+  }
   
   // Opportunities API
   Future<List<dynamic>> getOpportunities() async {
