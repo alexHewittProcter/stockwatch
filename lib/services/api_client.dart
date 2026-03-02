@@ -295,11 +295,76 @@ class ApiClient {
   }
   
   // Holders API
-  Future<List<dynamic>> getHolders(String symbol) async {
-    return await _request<List<dynamic>>(
+  Future<dynamic> getHolders(String symbol) async {
+    return await _request<dynamic>(
       'GET',
       '/api/holders/$symbol',
+    );
+  }
+  
+  Future<dynamic> getInstitutionPortfolio(String cik) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/holders/institution/$cik',
+    );
+  }
+  
+  Future<dynamic> getInsiderTransactions(String symbol, {int days = 90}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/holders/insider/$symbol',
+      queryParameters: {'days': days.toString()},
+    );
+  }
+  
+  Future<List<dynamic>> getTrackedHolders() async {
+    return await _request<List<dynamic>>(
+      'GET',
+      '/api/holders/tracked',
       parser: (data) => data as List<dynamic>,
+    );
+  }
+  
+  Future<dynamic> trackHolder(String name, {String? cik}) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/holders/track',
+      data: {'name': name, if (cik != null) 'cik': cik},
+    );
+  }
+  
+  Future<void> untrackHolder(String cik) async {
+    await _request<void>('DELETE', '/api/holders/track/$cik');
+  }
+  
+  Future<dynamic> getHolderChanges({String? quarter, int limit = 50}) async {
+    final params = <String, String>{
+      'limit': limit.toString(),
+      if (quarter != null) 'quarter': quarter,
+    };
+    
+    return await _request<dynamic>(
+      'GET',
+      '/api/holders/changes',
+      queryParameters: params,
+    );
+  }
+  
+  Future<dynamic> getHolderChangesById(String cik, {int quarters = 4}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/holders/changes/$cik',
+      queryParameters: {'quarters': quarters.toString()},
+    );
+  }
+  
+  Future<dynamic> getSmartMoneySignals({String? quarter}) async {
+    final params = quarter != null ? {'quarter': quarter} : <String, String>{};
+    
+    return await _request<dynamic>(
+      'GET',
+      '/api/holders/signals',
+      queryParameters: params,
     );
   }
   
