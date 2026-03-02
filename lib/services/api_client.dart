@@ -545,6 +545,155 @@ class ApiClient {
       queryParameters: {'hours': hours.toString()},
     );
   }
+
+  // Opportunities API
+  Future<dynamic> getOpportunities({
+    String? direction,
+    int? confidence,
+    String? timeframe,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final params = <String, String>{
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    };
+    
+    if (direction != null) params['direction'] = direction;
+    if (confidence != null) params['confidence'] = confidence.toString();
+    if (timeframe != null) params['timeframe'] = timeframe;
+
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities',
+      queryParameters: params,
+    );
+  }
+
+  Future<dynamic> getOpportunity(String id) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities/$id',
+    );
+  }
+
+  Future<dynamic> updateOpportunityStatus(String id, String status, {Map<String, dynamic>? outcome}) async {
+    final data = {'status': status};
+    if (outcome != null) data['outcome'] = outcome;
+    
+    return await _request<dynamic>(
+      'PUT',
+      '/api/opportunities/$id/status',
+      data: data,
+    );
+  }
+
+  Future<dynamic> generateOpportunities() async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/opportunities/generate',
+    );
+  }
+
+  Future<dynamic> getRecentSignals({int hours = 24, int limit = 100}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities/signals/recent',
+      queryParameters: {
+        'hours': hours.toString(),
+        'limit': limit.toString(),
+      },
+    );
+  }
+
+  Future<dynamic> detectSignals({List<String>? symbols}) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/opportunities/signals/detect',
+      data: {'symbols': symbols},
+    );
+  }
+
+  // Conditions API
+  Future<dynamic> getConditions() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities/conditions',
+    );
+  }
+
+  Future<dynamic> getCondition(String id) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities/conditions/$id',
+    );
+  }
+
+  Future<dynamic> createCondition({
+    required String name,
+    String? description,
+    required List<Map<String, dynamic>> rules,
+    required String logic,
+    List<String>? symbols,
+    bool notifyOnTrigger = true,
+  }) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/opportunities/conditions',
+      data: {
+        'name': name,
+        'description': description,
+        'rules': rules,
+        'logic': logic,
+        'symbols': symbols,
+        'notifyOnTrigger': notifyOnTrigger,
+      },
+    );
+  }
+
+  Future<dynamic> updateCondition(String id, Map<String, dynamic> updates) async {
+    return await _request<dynamic>(
+      'PUT',
+      '/api/opportunities/conditions/$id',
+      data: updates,
+    );
+  }
+
+  Future<dynamic> deleteCondition(String id) async {
+    return await _request<dynamic>(
+      'DELETE',
+      '/api/opportunities/conditions/$id',
+    );
+  }
+
+  Future<dynamic> evaluateConditions() async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/opportunities/conditions/evaluate',
+    );
+  }
+
+  Future<dynamic> backtestCondition(String id, String fromDate, String toDate) async {
+    return await _request<dynamic>(
+      'POST',
+      '/api/opportunities/conditions/$id/backtest',
+      data: {
+        'fromDate': fromDate,
+        'toDate': toDate,
+      },
+    );
+  }
+
+  Future<dynamic> getBacktests({String? conditionId}) async {
+    final params = <String, String>{};
+    if (conditionId != null) params['conditionId'] = conditionId;
+    
+    return await _request<dynamic>(
+      'GET',
+      '/api/opportunities/backtests',
+      queryParameters: params.isNotEmpty ? params : null,
+    );
+  }
   
   // Opportunities API
   Future<List<dynamic>> getOpportunities() async {
