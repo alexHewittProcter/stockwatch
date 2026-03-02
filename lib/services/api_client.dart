@@ -369,11 +369,93 @@ class ApiClient {
   }
   
   // Options API
-  Future<List<dynamic>> getOptionsChain(String symbol) async {
-    return await _request<List<dynamic>>(
+  Future<dynamic> getOptionsChain(String symbol, {String? expiry, String? type}) async {
+    final params = <String, String>{};
+    if (expiry != null) params['expiry'] = expiry;
+    if (type != null) params['type'] = type;
+    
+    return await _request<dynamic>(
       'GET',
       '/api/options/chain/$symbol',
-      parser: (data) => data as List<dynamic>,
+      queryParameters: params,
+    );
+  }
+
+  Future<dynamic> getOptionsExpirations(String symbol) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/expirations/$symbol',
+    );
+  }
+
+  Future<dynamic> getIVData(String symbol) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/iv/$symbol',
+    );
+  }
+
+  Future<dynamic> getIVHistory(String symbol) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/iv/history/$symbol',
+    );
+  }
+
+  Future<dynamic> getPutCallRatio(String symbol) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/pcr/$symbol',
+    );
+  }
+
+  Future<dynamic> getOptionsFlow({int minValue = 0, String? type, int limit = 50}) async {
+    final params = <String, String>{
+      'minValue': minValue.toString(),
+      'limit': limit.toString(),
+    };
+    if (type != null) params['type'] = type;
+
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/flow',
+      queryParameters: params,
+    );
+  }
+
+  Future<dynamic> getSymbolOptionsFlow(String symbol, {int limit = 20}) async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/flow/$symbol',
+      queryParameters: {'limit': limit.toString()},
+    );
+  }
+
+  Future<dynamic> getVolatilityDashboard() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/volatility/dashboard',
+    );
+  }
+
+  Future<dynamic> getMarketPCR() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/pcr/market',
+    );
+  }
+
+  Future<dynamic> getExtremeRatios() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/extremes',
+    );
+  }
+
+  Future<dynamic> getReversalSignals() async {
+    return await _request<dynamic>(
+      'GET',
+      '/api/options/reversals',
     );
   }
   
